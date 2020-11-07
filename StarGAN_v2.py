@@ -203,9 +203,9 @@ class StarGAN_v2():
             z = np.ones(shape=[self.batch_size, self.latent_dim], dtype=np.float32)
             s = np.ones(shape=[self.batch_size, self.style_dim], dtype=np.float32)
 
-            _ = self.mapping_network_ema([z, y])
-            _ = self.style_encoder_ema([x, y])
-            _ = self.generator_ema([x, s])
+            _ = self.mapping_network_ema([z, y], training=False)
+            _ = self.style_encoder_ema([x, y], training=False)
+            _ = self.generator_ema([x, s], training=False)
 
             """ Checkpoint """
             self.ckpt = tf.train.Checkpoint(generator_ema=self.generator_ema,

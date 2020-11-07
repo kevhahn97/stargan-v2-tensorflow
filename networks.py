@@ -156,7 +156,7 @@ class StyleEncoder(tf.keras.Model):
         blocks += [Conv(channels=ch_out, kernel=4, stride=1, pad=0, sn=self.sn, name='conv')]
         blocks += [Leaky_Relu(alpha=0.2)]
 
-        shared_layers = Sequential(blocks)
+        # shared_layers = Sequential(blocks)
 
         # unshared layers
         unshared_layers = []
@@ -164,12 +164,14 @@ class StyleEncoder(tf.keras.Model):
         for n_d in range(self.num_domains):
             unshared_layers += [FullyConnected(units=self.style_dim, sn=self.sn, name='domain_{}_style_fc'.format(n_d))]
 
-        return shared_layers, unshared_layers
+        return blocks, unshared_layers
 
     def call(self, x_init, training=True, mask=None):
         x, domain = x_init
 
-        h = self.shared_layers(x)
+        h = x
+        for layer in self.shared_layers:
+            h = layer(h)
 
         x = []
 

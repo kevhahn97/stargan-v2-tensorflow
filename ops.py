@@ -114,10 +114,11 @@ class ResBlock(tf.keras.layers.Layer):
         self.skip_flag = channels_in != channels_out
 
         self.conv_0 = Conv(self.channels_in, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn, name='conv_0')
-        self.ins_norm_0 = InstanceNorm(name='instance_norm_0')
-
         self.conv_1 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn, name='conv_1')
-        self.ins_norm_1 = InstanceNorm(name='instance_norm_1')
+
+        if self.normalize:
+            self.ins_norm_0 = InstanceNorm()
+            self.ins_norm_1 = InstanceNorm()
 
         if self.skip_flag:
             self.skip_conv = Conv(self.channels_out, kernel=1, stride=1, use_bias=False, sn=self.sn, name='skip_conv')
@@ -203,9 +204,27 @@ class AdainResBlock(tf.keras.layers.Layer):
 # Normalization
 ##################################################################################
 
-def InstanceNorm(epsilon=1e-5, name='InstanceNorm'):
-    return tfa.layers.normalizations.InstanceNormalization(epsilon=epsilon, scale=True, center=True,
-                                                           name=name)
+def InstanceNorm(epsilon=1e-5):
+    # return tfa.layers.normalizations.InstanceNormalization(epsilon=epsilon, scale=True, center=True,
+    #                                                        name=name)
+    return IN(epsilon)
+
+
+class IN(tf.keras.layers.Layer):
+    def __init__(self, epsilon):
+        super(IN, self).__init__()
+        self.epsilon = epsilon
+
+    def build(self, input_shape):
+        var_shape = [input_shape[-1]]
+        self.shift = tf.Variable(tf.zeros(var_shape))
+        self.scale = tf.Variable(tf.ones(var_shape))
+
+    def call(self, inputs, training=True, mask=None):
+        mu, sigma_sq = tf.nn.moments(inputs, [1, 2], keepdims=True)
+        normalized = (inputs - mu) * tf.math.rsqrt((sigma_sq + self.epsilon))
+        return self.scale * normalized + self.shift
+
 
 class AdaIN(tf.keras.layers.Layer):
     def __init__(self, channels, sn=False, epsilon=1e-5, name='AdaIN'):
@@ -287,14 +306,14 @@ class SpectralNormalization(tf.keras.layers.Wrapper):
 # Activation Function
 ##################################################################################
 
-def Leaky_Relu(x=None, alpha=0.01, name='leaky_relu'):
+def Leaky_Relu(x=None, alpha=0.01, name=None):
     # pytorch alpha is 0.01
     if x is None:
         return tf.keras.layers.LeakyReLU(alpha=alpha, name=name)
     else:
         return tf.keras.layers.LeakyReLU(alpha=alpha, name=name)(x)
 
-def Relu(x=None, name='relu'):
+def Relu(x=None, name=None):
     if x is None:
         return tf.keras.layers.Activation(tf.keras.activations.relu, name=name)
 
