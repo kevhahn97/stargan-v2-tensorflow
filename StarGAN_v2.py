@@ -8,16 +8,18 @@ http://creativecommons.org/licenses/by-nc/4.0/ or send a letter to
 Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
 """
 
-from utils import *
 import time
-from tensorflow.python.data.experimental import AUTOTUNE, prefetch_to_device
-
+from copy import deepcopy
 from glob import glob
+
+import PIL.Image
+from tensorflow.python.data.experimental import AUTOTUNE, prefetch_to_device
 from tqdm import tqdm
 from tqdm.contrib import tenumerate
+
 from networks import *
-from copy import deepcopy
-import PIL.Image
+from utils import *
+
 
 class StarGAN_v2():
     def __init__(self, args):
@@ -82,7 +84,6 @@ class StarGAN_v2():
         self.result_dir = os.path.join(args.result_dir, self.model_dir)
         check_folder(self.result_dir)
 
-
         dataset_path = './dataset'
 
         self.dataset_path = os.path.join(dataset_path, self.dataset_name, 'train')
@@ -130,21 +131,27 @@ class StarGAN_v2():
             dataset_num = len(img_class.images)
             print("Dataset number : ", dataset_num)
 
-            img_and_domain = tf.data.Dataset.from_tensor_slices((img_class.images, img_class.shuffle_images, img_class.domains))
+            img_and_domain = tf.data.Dataset.from_tensor_slices(
+                (img_class.images, img_class.shuffle_images, img_class.domains))
 
             gpu_device = '/gpu:0'
 
             img_and_domain = img_and_domain.shuffle(buffer_size=dataset_num, reshuffle_each_iteration=True).repeat()
-            img_and_domain = img_and_domain.map(map_func=img_class.image_processing, num_parallel_calls=AUTOTUNE).batch(self.batch_size, drop_remainder=True)
+            img_and_domain = img_and_domain.map(map_func=img_class.image_processing, num_parallel_calls=AUTOTUNE).batch(
+                self.batch_size, drop_remainder=True)
             img_and_domain = img_and_domain.apply(prefetch_to_device(gpu_device, buffer_size=AUTOTUNE))
 
             self.img_and_domain_iter = iter(img_and_domain)
 
             """ Network """
-            self.generator = Generator(self.img_size, self.img_ch, self.style_dim, max_conv_dim=self.hidden_dim, sn=False, name='Generator')
-            self.mapping_network = MappingNetwork(self.style_dim, self.hidden_dim, self.num_domains, sn=False, name='MappingNetwork')
-            self.style_encoder = StyleEncoder(self.img_size, self.style_dim, self.num_domains, max_conv_dim=self.hidden_dim, sn=False, name='StyleEncoder')
-            self.discriminator = Discriminator(self.img_size, self.num_domains, max_conv_dim=self.hidden_dim, sn=self.sn, name='Discriminator')
+            self.generator = Generator(self.img_size, self.img_ch, self.style_dim, max_conv_dim=self.hidden_dim,
+                                       sn=False, name='Generator')
+            self.mapping_network = MappingNetwork(self.style_dim, self.hidden_dim, self.num_domains, sn=False,
+                                                  name='MappingNetwork')
+            self.style_encoder = StyleEncoder(self.img_size, self.style_dim, self.num_domains,
+                                              max_conv_dim=self.hidden_dim, sn=False, name='StyleEncoder')
+            self.discriminator = Discriminator(self.img_size, self.num_domains, max_conv_dim=self.hidden_dim,
+                                               sn=self.sn, name='Discriminator')
 
             self.generator_ema = deepcopy(self.generator)
             self.mapping_network_ema = deepcopy(self.mapping_network)
@@ -164,20 +171,24 @@ class StarGAN_v2():
             _ = self.generator_ema([x, s])
             _ = self.discriminator([x, y])
 
-
             """ Optimizer """
-            self.g_optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr, beta_1=self.beta1, beta_2=self.beta2, epsilon=1e-08)
-            self.e_optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr, beta_1=self.beta1, beta_2=self.beta2, epsilon=1e-08)
-            self.f_optimizer = tf.keras.optimizers.Adam(learning_rate=self.f_lr, beta_1=self.beta1, beta_2=self.beta2, epsilon=1e-08)
-            self.d_optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr, beta_1=self.beta1, beta_2=self.beta2, epsilon=1e-08)
-
+            self.g_optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr, beta_1=self.beta1, beta_2=self.beta2,
+                                                        epsilon=1e-08)
+            self.e_optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr, beta_1=self.beta1, beta_2=self.beta2,
+                                                        epsilon=1e-08)
+            self.f_optimizer = tf.keras.optimizers.Adam(learning_rate=self.f_lr, beta_1=self.beta1, beta_2=self.beta2,
+                                                        epsilon=1e-08)
+            self.d_optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr, beta_1=self.beta1, beta_2=self.beta2,
+                                                        epsilon=1e-08)
 
             """ Checkpoint """
             self.ckpt = tf.train.Checkpoint(generator=self.generator, generator_ema=self.generator_ema,
-                                            mapping_network=self.mapping_network, mapping_network_ema=self.mapping_network_ema,
+                                            mapping_network=self.mapping_network,
+                                            mapping_network_ema=self.mapping_network_ema,
                                             style_encoder=self.style_encoder, style_encoder_ema=self.style_encoder_ema,
                                             discriminator=self.discriminator,
-                                            g_optimizer=self.g_optimizer, e_optimizer=self.e_optimizer, f_optimizer=self.f_optimizer,
+                                            g_optimizer=self.g_optimizer, e_optimizer=self.e_optimizer,
+                                            f_optimizer=self.f_optimizer,
                                             d_optimizer=self.d_optimizer)
             self.manager = tf.train.CheckpointManager(self.ckpt, self.checkpoint_dir, max_to_keep=1)
             self.start_iteration = 0
@@ -193,9 +204,12 @@ class StarGAN_v2():
         else:
             """ Test """
             """ Network """
-            self.generator_ema = Generator(self.img_size, self.img_ch, self.style_dim, max_conv_dim=self.hidden_dim, sn=False, name='Generator')
-            self.mapping_network_ema = MappingNetwork(self.style_dim, self.hidden_dim, self.num_domains, sn=False, name='MappingNetwork')
-            self.style_encoder_ema = StyleEncoder(self.img_size, self.style_dim, self.num_domains, max_conv_dim=self.hidden_dim, sn=False, name='StyleEncoder')
+            self.generator_ema = Generator(self.img_size, self.img_ch, self.style_dim, max_conv_dim=self.hidden_dim,
+                                           sn=False, name='Generator')
+            self.mapping_network_ema = MappingNetwork(self.style_dim, self.hidden_dim, self.num_domains, sn=False,
+                                                      name='MappingNetwork')
+            self.style_encoder_ema = StyleEncoder(self.img_size, self.style_dim, self.num_domains,
+                                                  max_conv_dim=self.hidden_dim, sn=False, name='StyleEncoder')
 
             """ Finalize model (build) """
             x = np.ones(shape=[self.batch_size, self.img_size, self.img_size, self.img_ch], dtype=np.float32)
@@ -282,7 +296,7 @@ class StarGAN_v2():
 
             if z_trg is not None:
                 s_trg = self.mapping_network([z_trg, y_trg])
-            else: # x_ref is not None
+            else:  # x_ref is not None
                 s_trg = self.style_encoder([x_ref, y_trg])
 
             x_fake = self.generator([x_real, s_trg])
@@ -331,16 +345,19 @@ class StarGAN_v2():
             d_adv_loss_ref, d_loss_ref = self.d_train_step(x_real, y_org, y_trg, x_ref=x_ref)
 
             # update generator
-            g_adv_loss_latent, g_sty_loss_latent, g_ds_loss_latent, g_cyc_loss_latent, g_loss_latent = self.g_train_step(x_real, y_org, y_trg, z_trgs=[z_trg, z_trg2])
-            g_adv_loss_ref, g_sty_loss_ref, g_ds_loss_ref, g_cyc_loss_ref, g_loss_ref = self.g_train_step(x_real, y_org, y_trg, x_refs=[x_ref, x_ref2])
+            g_adv_loss_latent, g_sty_loss_latent, g_ds_loss_latent, g_cyc_loss_latent, g_loss_latent = self.g_train_step(
+                x_real, y_org, y_trg, z_trgs=[z_trg, z_trg2])
+            g_adv_loss_ref, g_sty_loss_ref, g_ds_loss_ref, g_cyc_loss_ref, g_loss_ref = self.g_train_step(x_real, y_org,
+                                                                                                          y_trg,
+                                                                                                          x_refs=[x_ref,
+                                                                                                                  x_ref2])
 
             # compute moving average of network parameters
             moving_average(self.generator, self.generator_ema, beta=self.ema_decay)
             moving_average(self.mapping_network, self.mapping_network_ema, beta=self.ema_decay)
             moving_average(self.style_encoder, self.style_encoder_ema, beta=self.ema_decay)
 
-
-            if idx == 0 :
+            if idx == 0:
                 g_params = self.generator.count_params()
                 d_params = self.discriminator.count_params()
                 print("G network parameters : ", format(g_params, ','))
@@ -376,8 +393,6 @@ class StarGAN_v2():
 
             # save every self.print_freq
             if np.mod(idx + 1, self.print_freq) == 0:
-
-
                 latent_fake_save_path = './{}/latent_{:07d}.jpg'.format(self.sample_dir, idx + 1)
                 ref_fake_save_path = './{}/ref_{:07d}.jpg'.format(self.sample_dir, idx + 1)
 
@@ -385,7 +400,8 @@ class StarGAN_v2():
                 self.refer_canvas(x_real, x_ref, y_trg, ref_fake_save_path, img_num=5)
 
             print("iter: [%6d/%6d] time: %4.4f d_loss: %.8f, g_loss: %.8f" % (
-            idx, self.iteration, time.time() - iter_start_time, d_loss_latent+d_loss_ref, g_loss_latent+g_loss_ref))
+                idx, self.iteration, time.time() - iter_start_time, d_loss_latent + d_loss_ref,
+                g_loss_latent + g_loss_ref))
 
         # save model for final step
         self.manager.save(checkpoint_number=self.iteration)
@@ -441,7 +457,8 @@ class StarGAN_v2():
         canvas.save(path)
 
     def latent_canvas(self, x_real, path):
-        canvas = PIL.Image.new('RGB', (self.img_size * (self.num_domains + 1) + 10, self.img_size * self.num_style), 'white')
+        canvas = PIL.Image.new('RGB', (self.img_size * (self.num_domains + 1) + 10, self.img_size * self.num_style),
+                               'white')
 
         x_real = tf.expand_dims(x_real[0], axis=0)
         src_image = postprocess_images(x_real)[0]
@@ -462,7 +479,8 @@ class StarGAN_v2():
 
                 col_image = x_fake[0]
 
-                canvas.paste(PIL.Image.fromarray(np.uint8(col_image), 'RGB'), ((col + 1) * self.img_size + 10, row * self.img_size))
+                canvas.paste(PIL.Image.fromarray(np.uint8(col_image), 'RGB'),
+                             ((col + 1) * self.img_size + 10, row * self.img_size))
 
         canvas.save(path)
 
@@ -568,7 +586,8 @@ class StarGAN_v2():
                                     if ref_size == merge_size:
                                         ref_size = 0
 
-                                        save_path = './{}/ref_{}_{}.jpg'.format(self.result_dir, src_idx + 1, ref_idx + 1)
+                                        save_path = './{}/ref_{}_{}.jpg'.format(self.result_dir, src_idx + 1,
+                                                                                ref_idx + 1)
 
                                         self.refer_canvas(src_img, ref_img, ref_img_domain, save_path,
                                                           img_num=merge_size)

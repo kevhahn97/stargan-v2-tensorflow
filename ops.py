@@ -8,10 +8,11 @@ http://creativecommons.org/licenses/by-nc/4.0/ or send a letter to
 Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
 """
 
-import tensorflow as tf
-import tensorflow_addons as tfa
-from utils import pytorch_kaiming_weight_factor
 import math
+
+import tensorflow as tf
+
+from utils import pytorch_kaiming_weight_factor
 
 ##################################################################################
 # Initialization
@@ -23,6 +24,7 @@ distribution = "untruncated_normal"
 weight_initializer = tf.initializers.VarianceScaling(scale=factor, mode=mode, distribution=distribution)
 weight_regularizer = tf.keras.regularizers.l2(1e-4)
 weight_regularizer_fully = tf.keras.regularizers.l2(1e-4)
+
 
 ##################################################################################
 # Layers
@@ -74,6 +76,7 @@ class Conv(tf.keras.layers.Layer):
 
         return x
 
+
 class FullyConnected(tf.keras.layers.Layer):
     def __init__(self, units, use_bias=True, sn=False, name='FullyConnected'):
         super(FullyConnected, self).__init__(name=name)
@@ -98,12 +101,14 @@ class FullyConnected(tf.keras.layers.Layer):
 
         return x
 
+
 ##################################################################################
 # Blocks
 ##################################################################################
 
 class ResBlock(tf.keras.layers.Layer):
-    def __init__(self, channels_in, channels_out, normalize=False, downsample=False, use_bias=True, sn=False, name='ResBlock'):
+    def __init__(self, channels_in, channels_out, normalize=False, downsample=False, use_bias=True, sn=False,
+                 name='ResBlock'):
         super(ResBlock, self).__init__(name=name)
         self.channels_in = channels_in
         self.channels_out = channels_out
@@ -113,8 +118,10 @@ class ResBlock(tf.keras.layers.Layer):
         self.sn = sn
         self.skip_flag = channels_in != channels_out
 
-        self.conv_0 = Conv(self.channels_in, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn, name='conv_0')
-        self.conv_1 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn, name='conv_1')
+        self.conv_0 = Conv(self.channels_in, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
+                           name='conv_0')
+        self.conv_1 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
+                           name='conv_1')
 
         if self.normalize:
             self.ins_norm_0 = InstanceNorm()
@@ -151,7 +158,8 @@ class ResBlock(tf.keras.layers.Layer):
 
         x = self.residual(x_init) + self.shortcut(x_init)
 
-        return x / math.sqrt(2) # unit variance
+        return x / math.sqrt(2)  # unit variance
+
 
 class AdainResBlock(tf.keras.layers.Layer):
     def __init__(self, channels_in, channels_out, upsample=False, use_bias=True, sn=False, name='AdainResBlock'):
@@ -164,9 +172,11 @@ class AdainResBlock(tf.keras.layers.Layer):
 
         self.skip_flag = channels_in != channels_out
 
-        self.conv_0 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn, name='conv_0')
+        self.conv_0 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
+                           name='conv_0')
         self.adain_0 = AdaIN(self.channels_in, name='adain_0')
-        self.conv_1 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn, name='conv_1')
+        self.conv_1 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
+                           name='conv_1')
         self.adain_1 = AdaIN(self.channels_out, name='adain_1')
 
         if self.skip_flag:
@@ -199,6 +209,7 @@ class AdainResBlock(tf.keras.layers.Layer):
         x = self.residual(x_c, x_s) + self.shortcut(x_c)
 
         return x / math.sqrt(2)
+
 
 ##################################################################################
 # Normalization
@@ -235,7 +246,6 @@ class AdaIN(tf.keras.layers.Layer):
         self.gamma_fc = FullyConnected(units=self.channels, use_bias=True, sn=sn)
         self.beta_fc = FullyConnected(units=self.channels, use_bias=True, sn=sn)
 
-
     def call(self, x_init, training=True, mask=None):
         x, style = x_init
         x_mean, x_var = tf.nn.moments(x, axes=[1, 2], keepdims=True)
@@ -252,6 +262,7 @@ class AdaIN(tf.keras.layers.Layer):
         x = (1 + gamma) * x_norm + beta
 
         return x
+
 
 class SpectralNormalization(tf.keras.layers.Wrapper):
     def __init__(self, layer, iteration=1, eps=1e-12, training=True, **kwargs):
@@ -302,6 +313,7 @@ class SpectralNormalization(tf.keras.layers.Wrapper):
 
         self.layer.kernel.assign(self.w / sigma)
 
+
 ##################################################################################
 # Activation Function
 ##################################################################################
@@ -313,6 +325,7 @@ def Leaky_Relu(x=None, alpha=0.01, name=None):
     else:
         return tf.keras.layers.LeakyReLU(alpha=alpha, name=name)(x)
 
+
 def Relu(x=None, name=None):
     if x is None:
         return tf.keras.layers.Activation(tf.keras.activations.relu, name=name)
@@ -320,19 +333,21 @@ def Relu(x=None, name=None):
     else:
         return tf.keras.layers.Activation(tf.keras.activations.relu, name=name)(x)
 
+
 ##################################################################################
 # Pooling & Resize
 ##################################################################################
 
 def Flatten(x=None, name='flatten'):
-
     if x is None:
         return tf.keras.layers.Flatten(name=name)
-    else :
+    else:
         return tf.keras.layers.Flatten(name=name)(x)
+
 
 def avg_pooling(x, pool_size=2, name='avg_pool'):
     return tf.keras.layers.AvgPool2D(pool_size=pool_size, strides=pool_size, padding='VALID', name=name)(x)
+
 
 class Interpolate(tf.keras.layers.Layer):
     def __init__(self, scale_factor=2, mode='nearest', name='Interpolate'):
@@ -343,15 +358,17 @@ class Interpolate(tf.keras.layers.Layer):
     def call(self, x, training=None, mask=None):
         if self.mode == 'bilinear':
             x = bilinear_up_sample(x, scale_factor=self.scale_factor)
-        else : # nearest
+        else:  # nearest
             x = nearest_up_sample(x, scale_factor=self.scale_factor)
 
         return x
+
 
 def nearest_up_sample(x, scale_factor=2):
     _, h, w, _ = x.get_shape().as_list()
     new_size = [h * scale_factor, w * scale_factor]
     return tf.image.resize(x, size=new_size, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+
 
 def bilinear_up_sample(x, scale_factor=2):
     _, h, w, _ = x.get_shape().as_list()
@@ -368,44 +385,49 @@ def regularization_loss(model):
 
     return loss
 
+
 def L1_loss(x, y):
     loss = tf.reduce_mean(tf.abs(x - y))
 
     return loss
 
-def discriminator_loss(gan_type, real_logit, fake_logit):
 
+def discriminator_loss(gan_type, real_logit, fake_logit):
     real_loss = 0
     fake_loss = 0
 
-    if gan_type == 'lsgan' :
+    if gan_type == 'lsgan':
         real_loss = tf.reduce_mean(tf.math.squared_difference(real_logit, 1.0))
         fake_loss = tf.reduce_mean(tf.square(fake_logit))
 
-    if gan_type == 'gan' or gan_type == 'gan-gp' :
-        real_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(real_logit), logits=real_logit))
-        fake_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(fake_logit), logits=fake_logit))
+    if gan_type == 'gan' or gan_type == 'gan-gp':
+        real_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(real_logit), logits=real_logit))
+        fake_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(fake_logit), logits=fake_logit))
 
-    if gan_type == 'hinge' :
+    if gan_type == 'hinge':
         real_loss = tf.reduce_mean(Relu(1.0 - real_logit))
         fake_loss = tf.reduce_mean(Relu(1.0 + fake_logit))
 
     return real_loss + fake_loss
 
+
 def generator_loss(gan_type, fake_logit):
     fake_loss = 0
 
-    if gan_type == 'lsgan' :
+    if gan_type == 'lsgan':
         fake_loss = tf.reduce_mean(tf.math.squared_difference(fake_logit, 1.0))
 
     if gan_type == 'gan' or gan_type == 'gan-gp':
-        fake_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(fake_logit), logits=fake_logit))
+        fake_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(fake_logit), logits=fake_logit))
 
-    if gan_type == 'hinge' :
+    if gan_type == 'hinge':
         fake_loss = -tf.reduce_mean(fake_logit)
 
-
     return fake_loss
+
 
 def r1_gp_req(discriminator, x_real, y_org):
     with tf.GradientTape() as p_tape:
@@ -418,10 +440,12 @@ def r1_gp_req(discriminator, x_real, y_org):
 
     return r1_penalty
 
+
 @tf.function
 def moving_average(model, model_test, beta=0.999):
     for param, param_test in zip(model.trainable_weights, model_test.trainable_weights):
         param_test.assign(lerp(param, param_test, beta))
+
 
 def lerp(a, b, t):
     out = a + (b - a) * t
