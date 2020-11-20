@@ -161,9 +161,9 @@ class ResBlock(tf.keras.layers.Layer):
         return x / math.sqrt(2)  # unit variance
 
 
-class AdainResBlock(tf.keras.layers.Layer):
+class DecoderResBlock(tf.keras.layers.Layer):
     def __init__(self, channels_in, channels_out, upsample=False, use_bias=True, sn=False, name='AdainResBlock'):
-        super(AdainResBlock, self).__init__(name=name)
+        super(DecoderResBlock, self).__init__(name=name)
         self.channels_in = channels_in
         self.channels_out = channels_out
         self.upsample = upsample
@@ -174,13 +174,22 @@ class AdainResBlock(tf.keras.layers.Layer):
 
         self.conv_0 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
                            name='conv_0')
-        self.adain_0 = AdaIN(self.channels_in, name='adain_0')
+        # self.adain_0 = AdaIN(self.channels_in, name='adain_0')
         self.conv_1 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
                            name='conv_1')
-        self.adain_1 = AdaIN(self.channels_out, name='adain_1')
+        # self.adain_1 = AdaIN(self.channels_out, name='adain_1')
 
         if self.skip_flag:
             self.skip_conv = Conv(self.channels_out, kernel=1, stride=1, use_bias=False, sn=self.sn, name='skip_conv')
+
+    def build(self, input_shape):
+        x_shape, style_shape = input_shape
+        x_h, x_w = x_shape[1:3]
+        style_dim = style_shape[-1]
+        self.face_inj_0 = FaceInjection(x_h, x_w, face_code_dim=style_dim, sn=self.sn, name='face_inj_0')
+        if self.upsample:
+            x_h, x_w = x_h * 2, x_w * 2
+        self.face_inj_1 = FaceInjection(x_h, x_w, face_code_dim=style_dim, sn=self.sn, name='face_inj_1')
 
     def shortcut(self, x):
         if self.upsample:
@@ -191,13 +200,13 @@ class AdainResBlock(tf.keras.layers.Layer):
         return x
 
     def residual(self, x, s):
-        x = self.adain_0([x, s])
+        x = self.face_inj_0([x, s])
         x = Leaky_Relu(x, alpha=0.2)
         if self.upsample:
             x = nearest_up_sample(x, scale_factor=2)
         x = self.conv_0(x)
 
-        x = self.adain_1([x, s])
+        x = self.face_inj_1([x, s])
         x = Leaky_Relu(x, alpha=0.2)
         x = self.conv_1(x)
 
@@ -260,6 +269,25 @@ class AdaIN(tf.keras.layers.Layer):
         beta = tf.reshape(beta, shape=[-1, 1, 1, self.channels])
 
         x = (1 + gamma) * x_norm + beta
+
+        return x
+
+
+class FaceInjection(tf.keras.layers.Layer):
+    def __init__(self, x_h, x_w, face_code_dim, sn=False, name='FaceInjection'):
+        super(FaceInjection, self).__init__(name=name)
+        self.x_h = x_h
+        self.x_w = x_w
+        self.face_code_dim = face_code_dim
+
+        self.fc = FullyConnected(units=self.face_code_dim, use_bias=True, sn=sn)
+
+    def call(self, x_init, training=True, mask=None):
+        x, style = x_init
+        style = self.fc(style)
+        style = tf.reshape(style, [-1, 1, 1, self.face_code_dim])
+        style = tf.tile(style, [1, self.x_h, self.x_w, 1])
+        x = tf.concat([x, style], axis=-1)
 
         return x
 
@@ -429,10 +457,10 @@ def generator_loss(gan_type, fake_logit):
     return fake_loss
 
 
-def r1_gp_req(discriminator, x_real, y_org):
+def r1_gp_req(discriminator, x_real, x_mask):
     with tf.GradientTape() as p_tape:
         p_tape.watch(x_real)
-        real_loss = tf.reduce_sum(discriminator([x_real, y_org]))
+        real_loss = tf.reduce_sum(discriminator([x_real, x_mask]))
 
     real_grads = p_tape.gradient(real_loss, x_real)
 

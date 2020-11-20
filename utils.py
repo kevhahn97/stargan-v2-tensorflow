@@ -18,31 +18,83 @@ import tensorflow as tf
 
 
 class Image_data:
-
-    def __init__(self, img_size, channels, dataset_path, domain_list, augment_flag):
+    def __init__(self, img_size, channels, dataset_path, augment_flag, resize_method='area'):
         self.img_height = img_size
         self.img_width = img_size
         self.channels = channels
         self.augment_flag = augment_flag
 
         self.dataset_path = dataset_path
-        self.domain_list = domain_list
 
-        self.images = []
-        self.shuffle_images = []
-        self.domains = []
+        self.mask_images = []
+        self.mask_masks = []
+        self.nomask_images = []
+        self.nomask_images2 = []
+        self.nomask_masks = []
+        self.nomask_masks2 = []
+        self.resize_method = resize_method
 
-    def image_processing(self, filename, filename2, domain):
+    def image_processing(self, mask_path, mask_mask_path, nomask_path, nomask_mask_path, nomask_path2,
+                         nomask_mask_path2):
+        def make_getter(idx: int) -> callable:
+            def _inner(a: np.ndarray) -> np.ndarray:
+                return a[idx]
 
-        x = tf.io.read_file(filename)
+            return _inner
+
+        getters = {key: make_getter(idx) for idx, key in enumerate('tlhw')}
+
+        x = tf.io.read_file(mask_path)
         x_decode = tf.image.decode_jpeg(x, channels=self.channels, dct_method='INTEGER_ACCURATE')
-        img = tf.image.resize(x_decode, [self.img_height, self.img_width])
-        img = preprocess_fit_train_image(img)
+        mask_image = tf.image.resize(x_decode, [self.img_height, self.img_width], method=self.resize_method)
+        mask_image = preprocess_fit_train_image(mask_image)
 
-        x = tf.io.read_file(filename2)
+        x = tf.io.read_file(mask_mask_path)
+        # x_decode = tf.image.decode_png(x, channels=1)
+        # mask_mask = tf.image.resize(x_decode, [self.img_height, self.img_width],
+        #                             method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        x_decode = tf.io.decode_raw(x, out_type=tf.int32)
+        h = tf.numpy_function(getters['h'], [x_decode], tf.int32)
+        w = tf.numpy_function(getters['w'], [x_decode], tf.int32)
+        t = tf.numpy_function(getters['t'], [x_decode], tf.int32)
+        l = tf.numpy_function(getters['l'], [x_decode], tf.int32)
+        h = tf.clip_by_value(t + h, 1, self.img_height) - t
+        w = tf.clip_by_value(l + w, 1, self.img_width) - l
+        mask_mask = tf.ones([h, w, 1], dtype=tf.uint8) * 255
+        mask_mask = tf.image.pad_to_bounding_box(mask_mask, t, l, self.img_height, self.img_width)
+
+        x = tf.io.read_file(nomask_path)
         x_decode = tf.image.decode_jpeg(x, channels=self.channels, dct_method='INTEGER_ACCURATE')
-        img2 = tf.image.resize(x_decode, [self.img_height, self.img_width])
-        img2 = preprocess_fit_train_image(img2)
+        nomask_image = tf.image.resize(x_decode, [self.img_height, self.img_width], method=self.resize_method)
+        nomask_image = preprocess_fit_train_image(nomask_image)
+
+
+        x = tf.io.read_file(nomask_mask_path)
+        x_decode = tf.io.decode_raw(x, out_type=tf.int32)
+        h = tf.numpy_function(getters['h'], [x_decode], tf.int32)
+        w = tf.numpy_function(getters['w'], [x_decode], tf.int32)
+        t = tf.numpy_function(getters['t'], [x_decode], tf.int32)
+        l = tf.numpy_function(getters['l'], [x_decode], tf.int32)
+        h = tf.clip_by_value(t + h, 1, self.img_height) - t
+        w = tf.clip_by_value(l + w, 1, self.img_width) - l
+        nomask_mask = tf.ones([h, w, 1], dtype=tf.uint8) * 255
+        nomask_mask = tf.image.pad_to_bounding_box(nomask_mask, t, l, self.img_height, self.img_width)
+
+        x = tf.io.read_file(nomask_path2)
+        x_decode = tf.image.decode_jpeg(x, channels=self.channels, dct_method='INTEGER_ACCURATE')
+        nomask_image2 = tf.image.resize(x_decode, [self.img_height, self.img_width], method=self.resize_method)
+        nomask_image2 = preprocess_fit_train_image(nomask_image2)
+
+        x = tf.io.read_file(nomask_mask_path2)
+        x_decode = tf.io.decode_raw(x, out_type=tf.int32)
+        h = tf.numpy_function(getters['h'], [x_decode], tf.int32)
+        w = tf.numpy_function(getters['w'], [x_decode], tf.int32)
+        t = tf.numpy_function(getters['t'], [x_decode], tf.int32)
+        l = tf.numpy_function(getters['l'], [x_decode], tf.int32)
+        h = tf.clip_by_value(t + h, 1, self.img_height) - t
+        w = tf.clip_by_value(l + w, 1, self.img_width) - l
+        nomask_mask2 = tf.ones([h, w, 1], dtype=tf.uint8) * 255
+        nomask_mask2 = tf.image.pad_to_bounding_box(nomask_mask2, t, l, self.img_height, self.img_width)
 
         if self.augment_flag:
             seed = random.randint(0, 2 ** 31 - 1)
@@ -51,28 +103,67 @@ class Image_data:
             augment_height_size = self.img_height + (30 if self.img_height == 256 else int(self.img_height * 0.1))
             augment_width_size = self.img_width + (30 if self.img_width == 256 else int(self.img_width * 0.1))
 
-            img = tf.cond(pred=condition,
-                          true_fn=lambda: augmentation(img, augment_height_size, augment_width_size, seed),
-                          false_fn=lambda: img)
+            mask_image, mask_mask = tf.cond(pred=condition,
+                                            true_fn=lambda: augmentation(mask_image, mask_mask, augment_height_size,
+                                                                         augment_width_size,
+                                                                         seed, self.resize_method),
+                                            false_fn=lambda: (mask_image, mask_mask))
 
-            img2 = tf.cond(pred=condition,
-                           true_fn=lambda: augmentation(img2, augment_height_size, augment_width_size, seed),
-                           false_fn=lambda: img2)
+            nomask_image, nomask_mask = tf.cond(pred=condition,
+                                                true_fn=lambda: augmentation(nomask_image, nomask_mask,
+                                                                             augment_height_size,
+                                                                             augment_width_size,
+                                                                             seed, self.resize_method),
+                                                false_fn=lambda: (nomask_image, nomask_mask))
 
-        return img, img2, domain
+            nomask_image2, nomask_mask2 = tf.cond(pred=condition,
+                                                  true_fn=lambda: augmentation(nomask_image2, nomask_mask2,
+                                                                               augment_height_size,
+                                                                               augment_width_size,
+                                                                               seed, self.resize_method),
+                                                  false_fn=lambda: (nomask_image2, nomask_mask2))
+
+        mask_mask = tf.cast(mask_mask, dtype=tf.bool)  # Pixels for mask become True. Others become False.
+        mask_mask = tf.squeeze(mask_mask)
+
+        nomask_mask = tf.cast(nomask_mask, dtype=tf.bool)  # Pixels for mask become True. Others become False.
+        nomask_mask = tf.squeeze(nomask_mask)
+
+        nomask_mask2 = tf.cast(nomask_mask2, dtype=tf.bool)  # Pixels for mask become True. Others become False.
+        nomask_mask2 = tf.squeeze(nomask_mask2)
+
+        return mask_image, mask_mask, nomask_image, nomask_mask, nomask_image2, nomask_mask2
 
     def preprocess(self):
-        # self.domain_list = ['tiger', 'cat', 'dog', 'lion']
+        mask_image_list = glob(os.path.join(self.dataset_path, 'mask') + '/*.png') + glob(
+            os.path.join(self.dataset_path, 'mask') + '/*.jpg')
 
-        for idx, domain in enumerate(self.domain_list):
-            image_list = glob(os.path.join(self.dataset_path, domain) + '/*.png') + glob(
-                os.path.join(self.dataset_path, domain) + '/*.jpg')
-            shuffle_list = random.sample(image_list, len(image_list))
-            domain_list = [[idx]] * len(image_list)  # [ [0], [0], ... , [0] ]
+        # mask_mask_list = glob(os.path.join(self.dataset_path, 'mask_mask') + '/*.png') + glob(
+        #     os.path.join(self.dataset_path, 'mask_mask') + '/*.jpg')
+        mask_mask_list = [os.path.join(self.dataset_path, 'mask_mask', os.path.basename(m)) for m in mask_image_list]
 
-            self.images.extend(image_list)
-            self.shuffle_images.extend(shuffle_list)
-            self.domains.extend(domain_list)
+        nomask_image_list = glob(os.path.join(self.dataset_path, 'nomask') + '/*.png') + glob(
+            os.path.join(self.dataset_path, 'nomask') + '/*.jpg')
+
+        # nomask_mask_list = glob(os.path.join(self.dataset_path, 'nomask_mask') + '/*.png') + glob(
+        #     os.path.join(self.dataset_path, 'nomask_mask') + '/*.jpg')
+        nomask_mask_list = [os.path.join(self.dataset_path, 'nomask_mask', os.path.basename(m)) for m in nomask_image_list]
+
+        num_images = min(len(mask_image_list), len(nomask_image_list))
+        mask_image_list = mask_image_list[:num_images]
+        mask_mask_list = mask_mask_list[:num_images]
+        nomask_image_list = nomask_image_list[:num_images]
+        nomask_mask_list = nomask_mask_list[:num_images]
+
+        nomask_image_list2 = random.sample(nomask_image_list, len(nomask_image_list))
+        nomask_mask_list2 = [os.path.join(self.dataset_path, 'nomask_mask', os.path.basename(m)) for m in nomask_image_list2]
+
+        self.mask_images.extend(mask_image_list)
+        self.mask_masks.extend(mask_mask_list)
+        self.nomask_images.extend(nomask_image_list)
+        self.nomask_images2.extend(nomask_image_list2)
+        self.nomask_masks.extend(nomask_mask_list)
+        self.nomask_masks2.extend(nomask_mask_list2)
 
 
 def adjust_dynamic_range(images, range_in, range_out, out_dtype):
@@ -104,12 +195,26 @@ def load_images(image_path, img_size, img_channel):
     return img
 
 
-def augmentation(image, augment_height, augment_width, seed):
+def augmentation(image, mask, augment_height, augment_width, seed, resize_method='area'):
+    if mask is not None:
+        image = tf.concat([image, tf.cast(mask, dtype=tf.float32)], axis=-1)
     ori_image_shape = tf.shape(image)
     image = tf.image.random_flip_left_right(image, seed=seed)
-    image = tf.image.resize(image, [augment_height, augment_width])
+    image = tf.image.resize(image, [augment_height, augment_width], method=resize_method)
     image = tf.image.random_crop(image, ori_image_shape, seed=seed)
-    return image
+
+    if mask is not None:
+        # ori_mask_shape = tf.shape(mask)
+        # mask = tf.image.random_flip_left_right(mask, seed=seed)
+        # mask = tf.image.resize(mask, [augment_height, augment_width], method=resize_method)
+        # mask = tf.image.random_crop(mask, ori_mask_shape, seed=seed)
+        mask = image[..., 3:]
+        image = image[..., :3]
+        mask = tf.cast(mask, dtype=tf.uint8)
+
+    image = tf.image.random_brightness(image, max_delta=0.09, seed=seed)
+    # image = tf.image.random_contrast(image, lower=0., upper=0.2, seed=seed)
+    return image, mask
 
 
 def load_test_image(image_path, img_width, img_height, img_channel):

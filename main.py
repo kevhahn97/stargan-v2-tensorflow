@@ -19,6 +19,7 @@ from utils import *
 def parse_args():
     desc = "Tensorflow implementation of StarGAN_v2"
     parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('--memo', type=str, default='', help='describe model')
     parser.add_argument('--phase', type=str, default='train', help='train or test ?')
     parser.add_argument('--merge', type=str2bool, default=True,
                         help='In test phase, merge reference-guided image result or not')
@@ -30,7 +31,7 @@ def parse_args():
 
     parser.add_argument('--batch_size', type=int, default=8, help='The size of batch size')  # each gpu
     parser.add_argument('--print_freq', type=int, default=1000, help='The number of image_print_freq')
-    parser.add_argument('--save_freq', type=int, default=10000, help='The number of ckpt_save_freq')
+    parser.add_argument('--save_freq', type=int, default=1000, help='The number of ckpt_save_freq')
     parser.add_argument('--num_style', type=int, default=5,
                         help='Number of generated images per domain during sampling')
 
@@ -44,7 +45,7 @@ def parse_args():
     parser.add_argument('--sty_weight', type=float, default=1, help='Weight for style reconstruction loss')
     parser.add_argument('--ds_weight', type=float, default=1,
                         help='Weight for diversity sensitive loss')  # 2 for animal
-    parser.add_argument('--cyc_weight', type=float, default=1, help='Weight for cyclic consistency loss')
+    parser.add_argument('--sfp_weight', type=float, default=1, help='Weight for source face preserving loss')
     parser.add_argument('--r1_weight', type=float, default=1, help='Weight for R1 regularization')
 
     parser.add_argument('--gan_type', type=str, default='gan-gp', help='gan / lsgan / gan-gp / hinge')
@@ -67,7 +68,7 @@ def parse_args():
     parser.add_argument('--sample_dir', type=str, default='samples',
                         help='Directory name to save the samples on training')
 
-    return check_args(parser.parse_args(args=[]))
+    return check_args(parser.parse_args())
 
 
 """checking arguments"""
