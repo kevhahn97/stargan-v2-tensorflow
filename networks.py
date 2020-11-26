@@ -45,23 +45,28 @@ class Generator(tf.keras.Model):
         decoder = []
 
         # down/up-sampling blocks
+        self.adains = []
         for i in range(self.repeat_num):
             ch_out = min(ch_in * 2, self.max_conv_dim)
 
             encoder.append(ResBlock(ch_in, ch_out, normalize=True, downsample=True, sn=self.sn,
                                     name='encoder_down_resblock_' + str(i)))
-            decoder.insert(0, DecoderResBlock(ch_out, ch_in, upsample=True, sn=self.sn,
-                                              name='decoder_up_adaresblock_' + str(i)))  # stack-like
+            decoder.insert(0, DecoderResBlock(ch_out, ch_in, upsample=True, sn=self.sn, adain=False,
+                                              name='decoder_up_resblock_' + str(i)))  # stack-like
+            self.adains.insert(0, False)
 
             ch_in = ch_out
 
         # bottleneck blocks
-        for i in range(2):
+        assert 6 - self.repeat_num == 2
+        for i in range(self.repeat_num, 6):
             encoder.append(
-                ResBlock(ch_out, ch_out, normalize=True, sn=self.sn, name='encoder_bottleneck_resblock_' + str(i)))
+                ResBlock(ch_out, ch_out, normalize=True, downsample=True, sn=self.sn,
+                         name='encoder_down_resblock_' + str(i)))
             decoder.insert(0,
-                           DecoderResBlock(ch_out, ch_out, sn=self.sn, name='decoder_bottleneck_adaresblock_' + str(i)))
-
+                           DecoderResBlock(ch_out, ch_out, upsample=True, sn=self.sn, adain=True,
+                                           name='decoder_up_adaresblock_' + str(i)))
+            self.adains.insert(0, True)
         return encoder, decoder
 
     def call(self, x_init, training=True, mask=None):
@@ -76,8 +81,12 @@ class Generator(tf.keras.Model):
         for encoder_block in self.encoder:
             x = encoder_block(x)
 
-        for decoder_block in self.decoder:
-            x = decoder_block([x, x_s])
+        for decoder_block, adain in zip(self.decoder, self.adains):
+            if adain:
+                decoder_input = [x, x_s]
+            else:
+                decoder_input = [x, None]
+            x = decoder_block(decoder_input)
 
         x = self.to_rgb(x) * x_mask + rgb_skip
 

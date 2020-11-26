@@ -162,34 +162,41 @@ class ResBlock(tf.keras.layers.Layer):
 
 
 class DecoderResBlock(tf.keras.layers.Layer):
-    def __init__(self, channels_in, channels_out, upsample=False, use_bias=True, sn=False, name='AdainResBlock'):
+    def __init__(self, channels_in, channels_out, upsample=False, use_bias=True, sn=False, adain=True,
+                 name='AdainResBlock'):
         super(DecoderResBlock, self).__init__(name=name)
         self.channels_in = channels_in
         self.channels_out = channels_out
         self.upsample = upsample
         self.use_bias = use_bias
         self.sn = sn
+        self.adain = adain
 
         self.skip_flag = channels_in != channels_out
 
         self.conv_0 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
                            name='conv_0')
-        # self.adain_0 = AdaIN(self.channels_in, name='adain_0')
         self.conv_1 = Conv(self.channels_out, kernel=3, stride=1, pad=1, use_bias=self.use_bias, sn=self.sn,
                            name='conv_1')
-        # self.adain_1 = AdaIN(self.channels_out, name='adain_1')
+
+        if self.adain:
+            self.norm_0 = AdaIN(self.channels_in, name='adain_0')
+            self.norm_1 = AdaIN(self.channels_out, name='adain_1')
+        else:
+            self.norm_0 = InstanceNorm()
+            self.norm_1 = InstanceNorm()
 
         if self.skip_flag:
             self.skip_conv = Conv(self.channels_out, kernel=1, stride=1, use_bias=False, sn=self.sn, name='skip_conv')
 
-    def build(self, input_shape):
-        x_shape, style_shape = input_shape
-        x_h, x_w = x_shape[1:3]
-        style_dim = style_shape[-1]
-        self.face_inj_0 = FaceInjection(x_h, x_w, face_code_dim=style_dim, sn=self.sn, name='face_inj_0')
-        if self.upsample:
-            x_h, x_w = x_h * 2, x_w * 2
-        self.face_inj_1 = FaceInjection(x_h, x_w, face_code_dim=style_dim, sn=self.sn, name='face_inj_1')
+    # def build(self, input_shape):
+    #     x_shape, style_shape = input_shape
+    #     x_h, x_w = x_shape[1:3]
+    #     style_dim = style_shape[-1]
+    #     self.face_inj_0 = FaceInjection(x_h, x_w, face_code_dim=style_dim, sn=self.sn, name='face_inj_0')
+    #     if self.upsample:
+    #         x_h, x_w = x_h * 2, x_w * 2
+    #     self.face_inj_1 = FaceInjection(x_h, x_w, face_code_dim=style_dim, sn=self.sn, name='face_inj_1')
 
     def shortcut(self, x):
         if self.upsample:
@@ -199,14 +206,24 @@ class DecoderResBlock(tf.keras.layers.Layer):
 
         return x
 
-    def residual(self, x, s):
-        x = self.face_inj_0([x, s])
+    def residual(self, x, s=None):
+        # x = self.face_inj_0([x, s])
+        if self.adain:
+            assert s is not None
+            x = self.norm_0([x, s])
+        else:
+            x = self.norm_0(x)
         x = Leaky_Relu(x, alpha=0.2)
         if self.upsample:
             x = nearest_up_sample(x, scale_factor=2)
         x = self.conv_0(x)
 
-        x = self.face_inj_1([x, s])
+        # x = self.face_inj_1([x, s])
+        if self.adain:
+            assert s is not None
+            x = self.norm_1([x, s])
+        else:
+            x = self.norm_1(x)
         x = Leaky_Relu(x, alpha=0.2)
         x = self.conv_1(x)
 
@@ -214,7 +231,10 @@ class DecoderResBlock(tf.keras.layers.Layer):
 
     def call(self, x_init, training=True, mask=None):
         x_c, x_s = x_init
-
+        if self.adain:
+            assert x_s is not None
+        else:
+            assert x_s is None
         x = self.residual(x_c, x_s) + self.shortcut(x_c)
 
         return x / math.sqrt(2)
