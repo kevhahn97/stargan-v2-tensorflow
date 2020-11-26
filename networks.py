@@ -170,8 +170,6 @@ class Discriminator(tf.keras.Model):
         self.repeat_num = int(np.log2(img_size)) - 2  # if 256 -> 6
 
         self.encoder = self.architecture_init()
-        self.local_encoder = self.architecture_init()
-        self.merger = Conv(channels=1, kernel=1, stride=1, sn=self.sn, name='merger')
 
     def architecture_init(self):
         ch_in = self.channels
@@ -191,6 +189,7 @@ class Discriminator(tf.keras.Model):
         blocks += [Conv(channels=ch_out, kernel=4, stride=1, pad=0, sn=self.sn, name='conv_0')]
 
         blocks += [Leaky_Relu(alpha=0.2)]
+        blocks += [Conv(channels=1, kernel=1, stride=1, sn=self.sn, name='conv_1')]
 
         encoder = Sequential(blocks)
 
@@ -200,14 +199,9 @@ class Discriminator(tf.keras.Model):
         x, x_mask = inputs
         x_mask = tf.cast(x_mask, dtype=x.dtype)
         x_mask = x_mask[..., None]
+        x = tf.concat([x, x_mask], axis=-1)
 
         x = self.encoder(x)
-
-        x_local = x * x_mask
-        x_local = self.local_encoder(x_local)
-
-        x = tf.concat([x, x_local], axis=-1)
-        x = self.merger(x)
         x = tf.reshape(x, shape=[x.shape[0], -1])  # [bs, 1]
 
         return x
