@@ -25,6 +25,7 @@ def parse_args():
                         help='In test phase, merge reference-guided image result or not')
     parser.add_argument('--merge_size', type=int, default=0, help='merge size matching number')
     parser.add_argument('--dataset', type=str, default='celeba_hq_gender', help='dataset_name')
+    parser.add_argument('--test_dir', type=str, default='', help='dataset_name')
     parser.add_argument('--iteration', type=int, default=100000, help='The number of training iterations')
     parser.add_argument('--ds_iter', type=int, default=100000,
                         help='Number of iterations to optimize diversity sensitive loss')

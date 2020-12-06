@@ -86,9 +86,14 @@ class StarGAN_v2():
         dataset_path = '/home/ubuntu/rym/data/ffhq/fillpoly_256'
 
         self.dataset_path = os.path.join(dataset_path, self.dataset_name, 'train')
-        self.test_dataset_path = os.path.join(dataset_path, self.dataset_name, 'test')
+        if args.test_dir == '':
+            self.test_dataset_path = os.path.join(dataset_path, self.dataset_name, 'test')
+        else:
+            self.test_dataset_path = os.path.join(dataset_path, args.test_dir)
         domain_list = sorted([os.path.basename(x) for x in glob(self.dataset_path + '/*')])
-        assert domain_list == sorted(['mask', 'nomask', 'mask_mask', 'nomask_mask']), 'Domains must be mask and nomask'
+        if self.phase == 'train':
+            assert domain_list == sorted(
+                ['mask', 'nomask', 'mask_mask', 'nomask_mask']), 'Domains must be mask and nomask'
 
         print()
 
@@ -215,10 +220,11 @@ class StarGAN_v2():
             x = np.ones(shape=[self.batch_size, self.img_size, self.img_size, self.img_ch], dtype=np.float32)
             z = np.ones(shape=[self.batch_size, self.latent_dim], dtype=np.float32)
             s = np.ones(shape=[self.batch_size, self.style_dim], dtype=np.float32)
+            m = np.ones(shape=[self.batch_size, self.img_size, self.img_size], dtype=np.bool)
 
             _ = self.mapping_network_ema(z, training=False)
             _ = self.style_encoder_ema(x, training=False)
-            _ = self.generator_ema([x, s], training=False)
+            _ = self.generator_ema([x, s, m], training=False)
 
             """ Checkpoint """
             self.ckpt = tf.train.Checkpoint(generator_ema=self.generator_ema,
@@ -502,143 +508,166 @@ class StarGAN_v2():
         canvas.save(path)
 
     def test(self, merge=True, merge_size=0):
-        source_path = os.path.join(self.test_dataset_path, 'src_imgs')
-        source_images = glob(os.path.join(source_path, '*.png')) + glob(os.path.join(source_path, '*.jpg'))
-        source_images = sorted(source_images)
+        mask_dir = os.path.join(self.test_dataset_path, 'mask')
+        mask_image_path_list = glob(os.path.join(mask_dir, '*.png')) + glob(os.path.join(mask_dir, '*.jpg'))
+        mask_image_path_list = sorted(mask_image_path_list)
+
+        mask_mask_path_list = [os.path.join(self.test_dataset_path, 'mask_mask', os.path.basename(m)) for m in
+                               mask_image_path_list]
 
         # reference-guided synthesis
         print('reference-guided synthesis')
-        reference_path = os.path.join(self.test_dataset_path, 'ref_imgs')
-        reference_images = []
-        reference_domain = []
+        nomask_dir = os.path.join(self.test_dataset_path, 'nomask')
+        nomask_image_path_list = glob(os.path.join(nomask_dir, '*.png')) + glob(os.path.join(nomask_dir, '*.jpg'))
 
-        for idx, domain in enumerate(self.domain_list):
-            image_list = glob(os.path.join(reference_path, domain) + '/*.png') + glob(
-                os.path.join(reference_path, domain) + '/*.jpg')
-            image_list = sorted(image_list)
-            domain_list = [[idx]] * len(image_list)  # [ [0], [0], ... , [0] ]
+        nomask_mask_path_list = [os.path.join(self.test_dataset_path, 'nomask_mask', os.path.basename(m)) for m in
+                                 nomask_image_path_list]
 
-            reference_images.extend(image_list)
-            reference_domain.extend(domain_list)
+        getters = {key: make_getter(idx) for idx, key in enumerate('tlhw')}
+
+        nowtime = time.strftime('%Y%m%d_%H%M%S')
+
+        os.makedirs(os.path.join(self.result_dir, nowtime), exist_ok=True)
 
         if merge:
-            src_img = None
-            ref_img = None
-            ref_img_domain = None
+            mask_images = None
+            mask_masks = None
+            nomask_images = None
+            nomask_masks = None
 
             if merge_size == 0:
                 # [len_src_imgs : len_ref_imgs] matching
-                for src_idx, src_img_path in tenumerate(source_images):
-                    src_name, src_extension = os.path.splitext(src_img_path)
-                    src_name = os.path.basename(src_name)
+                for mask_idx, (mask_image_path, mask_mask_path) in tenumerate(
+                        zip(mask_image_path_list, mask_mask_path_list)):
+                    mask_image = load_images(mask_image_path, self.img_size,
+                                             self.img_ch)  # [img_size, img_size, img_ch]
+                    mask_image = tf.expand_dims(mask_image, axis=0)
 
-                    src_img_ = load_images(src_img_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
-                    src_img_ = tf.expand_dims(src_img_, axis=0)
+                    mask_mask = load_masks(mask_mask_path, getters, self.img_size)
+                    mask_mask = tf.expand_dims(mask_mask, axis=0)
 
-                    if src_idx == 0:
-                        src_img = src_img_
+                    if mask_idx == 0:
+                        mask_images = mask_image
+                        mask_masks = mask_mask
                     else:
-                        src_img = tf.concat([src_img, src_img_], axis=0)
+                        mask_images = tf.concat([mask_images, mask_image], axis=0)
+                        mask_masks = tf.concat([mask_masks, mask_mask], axis=0)
 
-                for ref_idx, (ref_img_path, ref_img_domain_) in tenumerate(zip(reference_images, reference_domain)):
-                    ref_name, ref_extension = os.path.splitext(ref_img_path)
-                    ref_name = os.path.basename(ref_name)
+                for nomask_idx, (nomask_image_path, nomask_mask_path) in tenumerate(
+                        zip(nomask_image_path_list, nomask_mask_path_list)):
+                    nomask_image = load_images(nomask_image_path, self.img_size,
+                                               self.img_ch)  # [img_size, img_size, img_ch]
+                    nomask_image = tf.expand_dims(nomask_image, axis=0)
 
-                    ref_img_ = load_images(ref_img_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
-                    ref_img_ = tf.expand_dims(ref_img_, axis=0)
-                    ref_img_domain_ = tf.expand_dims(ref_img_domain_, axis=0)
+                    # nomask_mask = load_masks(nomask_mask_path, getters, self.img_size)
+                    # nomask_mask = tf.expand_dims(nomask_mask, axis=0)
 
-                    if ref_idx == 0:
-                        ref_img = ref_img_
-                        ref_img_domain = ref_img_domain_
+                    if nomask_idx == 0:
+                        nomask_images = nomask_image
+                        # nomask_masks = nomask_mask
                     else:
-                        ref_img = tf.concat([ref_img, ref_img_], axis=0)
-                        ref_img_domain = tf.concat([ref_img_domain, ref_img_domain_], axis=0)
+                        nomask_images = tf.concat([nomask_images, nomask_image], axis=0)
+                        # nomask_masks = tf.concat([nomask_masks, nomask_mask], axis=0)
 
-                save_path = './{}/ref_all.jpg'.format(self.result_dir)
+                save_path = './{}/{}/ref_all.jpg'.format(self.result_dir, nowtime)
 
-                self.refer_canvas(src_img, ref_img, ref_img_domain, save_path,
-                                  img_num=[len(source_images), len(reference_images)])
+                self.refer_canvas(mask_images, mask_masks, nomask_images, save_path,
+                                  img_num=[len(mask_image_path_list), len(nomask_image_path_list)])
 
             else:
                 # [merge_size : merge_size] matching
                 src_size = 0
-                for src_idx, src_img_path in tenumerate(source_images):
-                    src_name, src_extension = os.path.splitext(src_img_path)
-                    src_name = os.path.basename(src_name)
+                for mask_idx, (mask_image_path, mask_mask_path) in tenumerate(
+                        zip(mask_image_path_list, mask_mask_path_list)):
+                    mask_image = load_images(mask_image_path, self.img_size,
+                                             self.img_ch)  # [img_size, img_size, img_ch]
+                    mask_image = tf.expand_dims(mask_image, axis=0)
 
-                    src_img_ = load_images(src_img_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
-                    src_img_ = tf.expand_dims(src_img_, axis=0)
+                    mask_mask = load_masks(mask_mask_path, getters, self.img_size)
+                    mask_mask = tf.expand_dims(mask_mask, axis=0)
 
                     if src_size < merge_size:
-                        if src_idx % merge_size == 0:
-                            src_img = src_img_
+                        if mask_idx % merge_size == 0:
+                            mask_images = mask_image
+                            mask_masks = mask_mask
                         else:
-                            src_img = tf.concat([src_img, src_img_], axis=0)
+                            mask_images = tf.concat([mask_images, mask_image], axis=0)
+                            mask_masks = tf.concat([mask_masks, mask_mask], axis=0)
                         src_size += 1
 
                         if src_size == merge_size:
                             src_size = 0
 
                             ref_size = 0
-                            for ref_idx, (ref_img_path, ref_img_domain_) in enumerate(
-                                    zip(reference_images, reference_domain)):
-                                ref_name, ref_extension = os.path.splitext(ref_img_path)
-                                ref_name = os.path.basename(ref_name)
+                            for nomask_idx, (nomask_image_path, nomask_mask_path) in enumerate(
+                                    zip(nomask_image_path_list, nomask_mask_path_list)):
+                                nomask_image = load_images(nomask_image_path, self.img_size,
+                                                           self.img_ch)  # [img_size, img_size, img_ch]
+                                nomask_image = tf.expand_dims(nomask_image, axis=0)
 
-                                ref_img_ = load_images(ref_img_path, self.img_size,
-                                                       self.img_ch)  # [img_size, img_size, img_ch]
-                                ref_img_ = tf.expand_dims(ref_img_, axis=0)
-                                ref_img_domain_ = tf.expand_dims(ref_img_domain_, axis=0)
+                                # nomask_mask = load_masks(nomask_mask_path, getters, self.img_size)
+                                # nomask_mask = tf.expand_dims(nomask_mask, axis=0)
 
                                 if ref_size < merge_size:
-                                    if ref_idx % merge_size == 0:
-                                        ref_img = ref_img_
-                                        ref_img_domain = ref_img_domain_
+                                    if nomask_idx % merge_size == 0:
+                                        nomask_images = nomask_image
+                                        # nomask_masks = nomask_mask
                                     else:
-                                        ref_img = tf.concat([ref_img, ref_img_], axis=0)
-                                        ref_img_domain = tf.concat([ref_img_domain, ref_img_domain_], axis=0)
+                                        nomask_images = tf.concat([nomask_images, nomask_image], axis=0)
+                                        # nomask_masks = tf.concat([nomask_masks, nomask_mask], axis=0)
 
                                     ref_size += 1
                                     if ref_size == merge_size:
                                         ref_size = 0
 
-                                        save_path = './{}/ref_{}_{}.jpg'.format(self.result_dir, src_idx + 1,
-                                                                                ref_idx + 1)
+                                        save_path = './{}/{}/ref_{}_{}.jpg'.format(self.result_dir,
+                                                                                   nowtime,
+                                                                                   mask_idx + 1,
+                                                                                   nomask_idx + 1)
 
-                                        self.refer_canvas(src_img, ref_img, ref_img_domain, save_path,
+                                        self.refer_canvas(mask_images, mask_masks, nomask_images, save_path,
                                                           img_num=merge_size)
 
         else:
             # [1:1] matching
-            for src_img_path in tqdm(source_images):
-                src_name, src_extension = os.path.splitext(src_img_path)
+            for mask_image_path, mask_mask_path in tqdm(zip(mask_image_path_list, mask_mask_path_list)):
+                src_name, src_extension = os.path.splitext(mask_image_path)
                 src_name = os.path.basename(src_name)
 
-                src_img = load_images(src_img_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
-                src_img = tf.expand_dims(src_img, axis=0)
+                mask_images = load_images(mask_image_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
+                mask_images = tf.expand_dims(mask_images, axis=0)
 
-                for ref_img_path, ref_img_domain in zip(reference_images, reference_domain):
-                    ref_name, ref_extension = os.path.splitext(ref_img_path)
+                mask_masks = load_masks(mask_mask_path, getters, self.img_size)
+                mask_masks = tf.expand_dims(mask_masks, axis=0)
+
+                for nomask_image_path, nomask_mask_path in zip(nomask_image_path_list, nomask_mask_path_list):
+                    ref_name, ref_extension = os.path.splitext(nomask_image_path)
                     ref_name = os.path.basename(ref_name)
 
-                    ref_img = load_images(ref_img_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
-                    ref_img = tf.expand_dims(ref_img, axis=0)
-                    ref_img_domain = tf.expand_dims(ref_img_domain, axis=0)
+                    nomask_images = load_images(nomask_image_path, self.img_size,
+                                                self.img_ch)  # [img_size, img_size, img_ch]
+                    nomask_images = tf.expand_dims(nomask_images, axis=0)
 
-                    save_path = './{}/ref_{}_{}{}'.format(self.result_dir, src_name, ref_name, src_extension)
+                    # nomask_masks = load_masks(nomask_mask_path, getters, self.img_size)
+                    # nomask_masks = tf.expand_dims(nomask_masks, axis=0)
 
-                    self.refer_canvas(src_img, ref_img, ref_img_domain, save_path, img_num=1)
+                    save_path = './{}/{}/ref_{}_{}{}'.format(self.result_dir, nowtime, src_name, ref_name,
+                                                             src_extension)
+
+                    self.refer_canvas(mask_images, mask_masks, nomask_images, save_path, img_num=1)
 
         # latent-guided synthesis
         print('latent-guided synthesis')
-        for src_img_path in tqdm(source_images):
-            src_name, src_extension = os.path.splitext(src_img_path)
+        for mask_image_path, mask_mask_path in tqdm(zip(mask_image_path_list, mask_mask_path_list)):
+            src_name, src_extension = os.path.splitext(mask_image_path)
             src_name = os.path.basename(src_name)
 
-            src_img = load_images(src_img_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
-            src_img = tf.expand_dims(src_img, axis=0)
+            mask_images = load_images(mask_image_path, self.img_size, self.img_ch)  # [img_size, img_size, img_ch]
+            mask_images = tf.expand_dims(mask_images, axis=0)
 
-            save_path = './{}/latent_{}{}'.format(self.result_dir, src_name, src_extension)
+            mask_masks = load_masks(mask_mask_path, getters, self.img_size)
+            mask_masks = tf.expand_dims(mask_masks, axis=0)
 
-            self.latent_canvas(src_img, save_path)
+            save_path = './{}/{}/latent_{}{}'.format(self.result_dir, nowtime, src_name, src_extension)
+
+            self.latent_canvas(mask_images, mask_masks, save_path)
